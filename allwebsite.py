@@ -6,8 +6,8 @@ import os
 print("🚀 Script started")
 
 # ================= FLAGS =================
-SAVE_TO_FILE = False        # True only for local testing
-SEND_TO_TELEGRAM = False   # True only in production
+SAVE_TO_FILE = False  # Set True only for local testing
+SEND_TO_TELEGRAM = os.getenv("SEND_TO_TELEGRAM") == "true"
 
 # ================= TIME =================
 today_date = datetime.now().strftime("%d-%m-%Y")
@@ -36,9 +36,12 @@ websites = [
     }
 ]
 
+# ================= OUTPUT =================
 output_text = f"Timestamp: {timestamp}\n\nRaw data:\n\n"
 sent_links = set()
+news_count = 0
 
+# ================= SCRAPING =================
 for site in websites:
     print(f"🔎 Fetching {site['name']}")
     output_text += f"{site['name']}:\n\n"
@@ -77,11 +80,12 @@ for site in websites:
         sent_links.add(full_url)
         output_text += f"{title} - {full_url}\n\n"
         count += 1
+        news_count += 1
 
     if count == 0:
-        output_text += "No news found\n\n"
+        output_text += "No new news found\n\n"
 
-# ================= OPTIONAL FILE SAVE =================
+# ================= OPTIONAL FILE SAVE (LOCAL ONLY) =================
 if SAVE_TO_FILE:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     folder_path = os.path.join(BASE_DIR, "news_output")
@@ -101,9 +105,18 @@ def send_to_telegram(message):
         return
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {"chat_id": chat_id, "text": message[:4000]}
+    payload = {
+        "chat_id": chat_id,
+        "text": message[:4000]
+    }
+
     requests.post(url, data=payload)
 
-if SEND_TO_TELEGRAM:
+# ================= SEND ONLY IF NEWS EXISTS =================
+if SEND_TO_TELEGRAM and news_count > 0:
     send_to_telegram(output_text)
-    print("🎉 Telegram message sent")
+    print(f"🎉 Telegram message sent ({news_count} news)")
+elif SEND_TO_TELEGRAM:
+    print("ℹ️ No new news – Telegram not sent")
+
+print("✅ Script finished cleanly")
