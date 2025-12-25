@@ -5,11 +5,11 @@ import os
 
 print("🚀 Script started")
 
-# ================= FLAGS =================
-SAVE_TO_FILE = False  # Local testing only
-SEND_TO_TELEGRAM = os.getenv("SEND_TO_TELEGRAM") == "true"
+# ================= FLAGS (TESTING SAFE) =================
+SAVE_TO_FILE = False        # Set True if you want a txt file locally
+SEND_TO_TELEGRAM = False   # Keep False during testing
 
-# ================= TIME (FORCE IST) =================
+# ================= TIME (IST) =================
 IST = timezone(timedelta(hours=5, minutes=30))
 now_ist = datetime.now(IST)
 
@@ -19,7 +19,7 @@ timestamp = now_ist.strftime("%d-%m-%Y %I:%M %p IST")
 # ================= HEADERS =================
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-# ================= DEDUP FILE (ARTIFACT-SAFE) =================
+# ================= DEDUP FILE (SIMULATES GITHUB ARTIFACT) =================
 DEDUP_FILE = "sent_links.txt"
 
 sent_links = set()
@@ -65,10 +65,10 @@ for site in websites:
         continue
 
     soup = BeautifulSoup(r.text, "html.parser")
-    count = 0
+    site_new_count = 0
 
     for a in soup.find_all("a", href=True):
-        if count >= site["limit"]:
+        if site_new_count >= site["limit"]:
             break
 
         tag = a.find(site["tag"])
@@ -93,50 +93,35 @@ for site in websites:
         new_links_added = True
 
         output_text += f"{title} - {full_url}\n\n"
-        count += 1
+        site_new_count += 1
         news_count += 1
 
-    if count == 0:
+    if site_new_count == 0:
         output_text += "No new news found\n\n"
 
-# ================= SAVE DEDUP FILE (FOR ARTIFACT UPLOAD) =================
+# ================= SAVE DEDUP FILE =================
 if new_links_added:
     with open(DEDUP_FILE, "w", encoding="utf-8") as f:
         for link in sorted(sent_links):
             f.write(link + "\n")
 
-# ================= OPTIONAL FILE SAVE (LOCAL ONLY) =================
+# ================= OPTIONAL FILE SAVE =================
 if SAVE_TO_FILE:
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    folder_path = os.path.join(BASE_DIR, "news_output")
+    folder_path = "news_output"
     os.makedirs(folder_path, exist_ok=True)
     file_path = os.path.join(folder_path, f"tiruppur_news_raw_{today_date}.txt")
     with open(file_path, "w", encoding="utf-8") as f:
         f.write(output_text)
     print("📄 File created:", file_path)
 
-# ================= TELEGRAM =================
-def send_to_telegram(message):
-    token = os.getenv("TELEGRAM_BOT_TOKEN")
-    chat_id = os.getenv("TELEGRAM_CHAT_ID")
+# ================= FINAL OUTPUT =================
+print("\n================ OUTPUT ================\n")
+print(output_text.strip())
+print("\n========================================")
 
-    if not token or not chat_id:
-        print("Telegram secrets not set")
-        return
-
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": message[:4000]
-    }
-
-    requests.post(url, data=payload)
-
-# ================= SEND ONLY IF NEWS EXISTS =================
-if SEND_TO_TELEGRAM and news_count > 0:
-    send_to_telegram(output_text)
-    print(f"🎉 Telegram message sent ({news_count} news)")
-elif SEND_TO_TELEGRAM:
-    print("ℹ️ No new news – Telegram not sent")
+if news_count == 0:
+    print("ℹ️ No new news found (dedup working correctly)")
+else:
+    print(f"✅ {news_count} new news item(s) found")
 
 print("✅ Script finished cleanly")
