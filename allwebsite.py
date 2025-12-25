@@ -6,15 +6,22 @@ import time
 import os
 from datetime import datetime
 
-# ================= SILENCE CHROME LOGS =================
+# ================= SILENCE LOGS =================
 os.environ["WDM_LOG_LEVEL"] = "0"
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
+# ================= CHROME OPTIONS (CLOUD SAFE) =================
 options = Options()
-options.add_argument("--headless=new")
+
+# REQUIRED for GitHub Actions / Cloud
+options.add_argument("--headless")
 options.add_argument("--no-sandbox")
-options.add_argument("--disable-gpu")
 options.add_argument("--disable-dev-shm-usage")
+options.add_argument("--disable-gpu")
+options.add_argument("--window-size=1920,1080")
+options.add_argument("--remote-debugging-port=9222")
+
+# Optional stability flags
 options.add_argument("--disable-webgl")
 options.add_argument("--disable-software-rasterizer")
 options.add_argument("--log-level=3")
@@ -23,11 +30,12 @@ options.add_experimental_option("excludeSwitches", ["enable-logging"])
 service = Service(log_path=os.devnull)
 driver = webdriver.Chrome(service=service, options=options)
 
-# ================= DATE, TIME, PATH =================
+# ================= DATE & TIME =================
 today_date = datetime.now().strftime("%d-%m-%Y")
 timestamp = datetime.now().strftime("%d-%m-%Y %I:%M %p")
 
-folder_path = r"C:\Users\Srini\pythonscript\news output"
+# ================= OUTPUT PATH =================
+folder_path = "./output"
 os.makedirs(folder_path, exist_ok=True)
 
 file_name = f"tiruppur_news_raw_{today_date}.txt"
@@ -68,31 +76,16 @@ websites = [
 try:
     with open(file_path, "w", encoding="utf-8") as file:
 
-        # ================= CHATGPT PROMPT HEADER =================
+        # ================= PROMPT HEADER =================
         file.write(
             "I will provide you with raw news data below in the following format:\n\n"
             "[Headline in Tamil] - [URL]\n\n"
-            "For example:\n"
-            "தீபாவளி பண்டிகைக்கான ஆர்டர்கள்.. அதிகரிப்பு: பின்னலாடை உற்பத்தியாளர் மகிழ்ச்சி - "
-            "https://www.dinamalar.com/news/tamil-nadu-district-news-tiruppur/"
-            "increase--orders-for-diwali-festival--knitwear-manufacturer-happy/4049049\n\n"
-            "Please generate the output in **two formats**:\n\n"
-            "1️⃣ **Without links:**\n"
-            "- Remove website name at the end\n"
-            "- Give me \"Without links\" in easy sharable format with bullet points\n"
-            "- Give space between each news\n"
-            "- Create a newspaper-style single-line news sentence in Tamil\n"
-            "- Include today’s date at the top like:\n"
-            "**நம்ம திருப்பூர் நியூஸ் - திருப்பூர் முக்கிய செய்திகள் - நாள் (today’s date)**\n\n"
-            "2️⃣ **With links:**\n"
-            "- Same format, but each news sentence should be a clickable link\n\n"
-            "Output must be concise, smooth, and professional.\n"
-            "Remove \"திருப்பூர்\" in Without Links (Copy & Share Friendly Format)\n\n"
+            "Please generate the output in two formats.\n\n"
             f"Timestamp: {timestamp}\n\n"
             "Raw data:\n\n"
         )
 
-        # ================= RAW DATA =================
+        # ================= SCRAPE DATA =================
         for site in websites:
             file.write(f"{site['name']}:\n\n")
 
