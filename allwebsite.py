@@ -3,11 +3,11 @@ from bs4 import BeautifulSoup
 from datetime import datetime, timezone, timedelta
 import os
 
-print("🚀 Script started")
+print("🚀 Script started (Telegram Test Mode)")
 
-# ================= FLAGS (TESTING SAFE) =================
-SAVE_TO_FILE = False        # Set True if you want a txt file locally
-SEND_TO_TELEGRAM = False   # Keep False during testing
+# ================= FLAGS =================
+SAVE_TO_FILE = False
+SEND_TO_TELEGRAM = True   # 🔴 ENABLED FOR TELEGRAM TESTING
 
 # ================= TIME (IST) =================
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -19,7 +19,7 @@ timestamp = now_ist.strftime("%d-%m-%Y %I:%M %p IST")
 # ================= HEADERS =================
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-# ================= DEDUP FILE (SIMULATES GITHUB ARTIFACT) =================
+# ================= DEDUP FILE =================
 DEDUP_FILE = "sent_links.txt"
 
 sent_links = set()
@@ -85,7 +85,6 @@ for site in websites:
         if site["must_contain"] not in full_url.lower():
             continue
 
-        # ===== GLOBAL DEDUP =====
         if full_url in sent_links:
             continue
 
@@ -105,23 +104,32 @@ if new_links_added:
         for link in sorted(sent_links):
             f.write(link + "\n")
 
-# ================= OPTIONAL FILE SAVE =================
-if SAVE_TO_FILE:
-    folder_path = "news_output"
-    os.makedirs(folder_path, exist_ok=True)
-    file_path = os.path.join(folder_path, f"tiruppur_news_raw_{today_date}.txt")
-    with open(file_path, "w", encoding="utf-8") as f:
-        f.write(output_text)
-    print("📄 File created:", file_path)
+# ================= TELEGRAM =================
+def send_to_telegram(message):
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    chat_id = os.getenv("TELEGRAM_CHAT_ID")
 
-# ================= FINAL OUTPUT =================
-print("\n================ OUTPUT ================\n")
-print(output_text.strip())
-print("\n========================================")
+    if not token or not chat_id:
+        print("❌ Telegram secrets not set")
+        return
 
-if news_count == 0:
-    print("ℹ️ No new news found (dedup working correctly)")
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": message[:4000]
+    }
+
+    r = requests.post(url, data=payload)
+    print("📨 Telegram status:", r.status_code)
+
+# ================= SEND =================
+if news_count > 0:
+    send_to_telegram(output_text)
+    print(f"🎉 Telegram message sent ({news_count} news)")
 else:
-    print(f"✅ {news_count} new news item(s) found")
+    send_to_telegram(
+        f"Timestamp: {timestamp}\n\nℹ️ No new Tiruppur news at this time."
+    )
+    print("ℹ️ No news – test message sent")
 
 print("✅ Script finished cleanly")
