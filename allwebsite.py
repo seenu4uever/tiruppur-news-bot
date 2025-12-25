@@ -3,23 +3,21 @@ from bs4 import BeautifulSoup
 from datetime import datetime, timezone, timedelta
 import os
 
-print("🚀 Script started (Telegram Test Mode)")
+print("🚀 Script started")
 
 # ================= FLAGS =================
-SAVE_TO_FILE = False
-SEND_TO_TELEGRAM = True   # 🔴 ENABLED FOR TELEGRAM TESTING
+SEND_TO_TELEGRAM = os.getenv("SEND_TO_TELEGRAM") == "true"
 
 # ================= TIME (IST) =================
 IST = timezone(timedelta(hours=5, minutes=30))
 now_ist = datetime.now(IST)
 
-today_date = now_ist.strftime("%d-%m-%Y")
 timestamp = now_ist.strftime("%d-%m-%Y %I:%M %p IST")
 
 # ================= HEADERS =================
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-# ================= DEDUP FILE =================
+# ================= DEDUP FILE (ARTIFACT SAFE) =================
 DEDUP_FILE = "sent_links.txt"
 
 sent_links = set()
@@ -85,6 +83,7 @@ for site in websites:
         if site["must_contain"] not in full_url.lower():
             continue
 
+        # ===== GLOBAL DEDUP =====
         if full_url in sent_links:
             continue
 
@@ -119,17 +118,13 @@ def send_to_telegram(message):
         "text": message[:4000]
     }
 
-    r = requests.post(url, data=payload)
-    print("📨 Telegram status:", r.status_code)
+    requests.post(url, data=payload)
 
-# ================= SEND =================
-if news_count > 0:
+# ================= SEND ONLY IF NEW NEWS =================
+if SEND_TO_TELEGRAM and news_count > 0:
     send_to_telegram(output_text)
-    print(f"🎉 Telegram message sent ({news_count} news)")
+    print(f"🎉 Telegram sent ({news_count} new news)")
 else:
-    send_to_telegram(
-        f"Timestamp: {timestamp}\n\nℹ️ No new Tiruppur news at this time."
-    )
-    print("ℹ️ No news – test message sent")
+    print("ℹ️ No new news – Telegram not sent")
 
 print("✅ Script finished cleanly")
