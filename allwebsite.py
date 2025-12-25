@@ -1,20 +1,31 @@
 import requests
 from bs4 import BeautifulSoup
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import os
 
 print("🚀 Script started")
 
 # ================= FLAGS =================
-SAVE_TO_FILE = False  # Set True only for local testing
+SAVE_TO_FILE = False  # Local testing only
 SEND_TO_TELEGRAM = os.getenv("SEND_TO_TELEGRAM") == "true"
 
-# ================= TIME =================
-today_date = datetime.now().strftime("%d-%m-%Y")
-timestamp = datetime.now().strftime("%d-%m-%Y %I:%M %p")
+# ================= TIME (FORCE IST) =================
+IST = timezone(timedelta(hours=5, minutes=30))
+now_ist = datetime.now(IST)
+
+today_date = now_ist.strftime("%d-%m-%Y")
+timestamp = now_ist.strftime("%d-%m-%Y %I:%M %p IST")
 
 # ================= HEADERS =================
 HEADERS = {"User-Agent": "Mozilla/5.0"}
+
+# ================= DEDUP FILE (ARTIFACT-SAFE) =================
+DEDUP_FILE = "sent_links.txt"
+
+sent_links = set()
+if os.path.exists(DEDUP_FILE):
+    with open(DEDUP_FILE, "r", encoding="utf-8") as f:
+        sent_links = set(line.strip() for line in f if line.strip())
 
 # ================= WEBSITES =================
 websites = [
@@ -38,8 +49,8 @@ websites = [
 
 # ================= OUTPUT =================
 output_text = f"Timestamp: {timestamp}\n\nRaw data:\n\n"
-sent_links = set()
 news_count = 0
+new_links_added = False
 
 # ================= SCRAPING =================
 for site in websites:
@@ -74,16 +85,25 @@ for site in websites:
         if site["must_contain"] not in full_url.lower():
             continue
 
+        # ===== GLOBAL DEDUP =====
         if full_url in sent_links:
             continue
 
         sent_links.add(full_url)
+        new_links_added = True
+
         output_text += f"{title} - {full_url}\n\n"
         count += 1
         news_count += 1
 
     if count == 0:
         output_text += "No new news found\n\n"
+
+# ================= SAVE DEDUP FILE (FOR ARTIFACT UPLOAD) =================
+if new_links_added:
+    with open(DEDUP_FILE, "w", encoding="utf-8") as f:
+        for link in sorted(sent_links):
+            f.write(link + "\n")
 
 # ================= OPTIONAL FILE SAVE (LOCAL ONLY) =================
 if SAVE_TO_FILE:
