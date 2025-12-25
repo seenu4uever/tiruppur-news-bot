@@ -3,7 +3,7 @@ name: Tiruppur Daily News Bot
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 * * * *"  # Runs every one hour
+    - cron: "0 * * * *"   # Runs every hour (UTC)
 
 jobs:
   run-news:
@@ -27,5 +27,6 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SEND_TO_TELEGRAM: "true"
         run: |
           python allwebsite.py
