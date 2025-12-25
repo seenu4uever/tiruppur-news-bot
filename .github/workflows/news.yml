@@ -3,7 +3,7 @@ name: Tiruppur Daily News Bot
 on:
   workflow_dispatch:
   schedule:
-    - cron: "30 0 * * *"   # Runs daily at 6:00 AM IST
+    - cron: "0 * * * *"  # Runs every one hour
 
 jobs:
   run-news:
