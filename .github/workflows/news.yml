@@ -3,7 +3,7 @@ name: Tiruppur Daily News Bot
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 * * * *"   # every hour
+    - cron: "0 * * * *"
 
 jobs:
   run-news:
@@ -23,11 +23,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # 🔽 RESTORE DEDUP FILE
+      # ✅ OPTION A FIX (CRITICAL)
       - name: Download sent links artifact
         uses: actions/download-artifact@v4
         with:
           name: sent-links
+          path: .
         continue-on-error: true
 
       - name: Run news bot
@@ -38,7 +39,6 @@ jobs:
         run: |
           python allwebsite.py
 
-      # 🔼 SAVE DEDUP FILE
       - name: Upload sent links artifact
         uses: actions/upload-artifact@v4
         with:
