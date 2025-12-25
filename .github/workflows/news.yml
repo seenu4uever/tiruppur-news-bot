@@ -23,7 +23,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # ✅ OPTION A FIX (CRITICAL)
+      # 🔽 DOWNLOAD ARTIFACT
       - name: Download sent links artifact
         uses: actions/download-artifact@v4
         with:
@@ -31,14 +31,27 @@ jobs:
           path: .
         continue-on-error: true
 
+      # 🧪 DEBUG STEP (ADD THIS)
+      - name: Debug sent_links file
+        run: |
+          echo "PWD:"
+          pwd
+          echo "FILES:"
+          ls -la
+          echo "---- sent_links.txt ----"
+          cat sent_links.txt || echo "sent_links.txt NOT FOUND"
+
+      # ▶️ RUN PYTHON
       - name: Run news bot
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           SEND_TO_TELEGRAM: "true"
         run: |
+          cd $GITHUB_WORKSPACE
           python allwebsite.py
 
+      # 🔼 UPLOAD ARTIFACT
       - name: Upload sent links artifact
         uses: actions/upload-artifact@v4
         with:
