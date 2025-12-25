@@ -5,24 +5,25 @@ import os
 
 print("🚀 Script started")
 
-# ================= FLAGS =================
+# ================= CONFIG =================
 SEND_TO_TELEGRAM = os.getenv("SEND_TO_TELEGRAM") == "true"
+DEDUP_FILE = "sent_links.txt"
+HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 # ================= TIME (IST) =================
 IST = timezone(timedelta(hours=5, minutes=30))
 now_ist = datetime.now(IST)
 timestamp = now_ist.strftime("%d-%m-%Y %I:%M %p IST")
 
-# ================= HEADERS =================
-HEADERS = {"User-Agent": "Mozilla/5.0"}
+# ================= ENSURE DEDUP FILE EXISTS =================
+if not os.path.exists(DEDUP_FILE):
+    open(DEDUP_FILE, "w", encoding="utf-8").close()
 
-# ================= DEDUP FILE =================
-DEDUP_FILE = "sent_links.txt"
+# ================= LOAD SENT LINKS =================
+with open(DEDUP_FILE, "r", encoding="utf-8") as f:
+    sent_links = set(line.strip() for line in f if line.strip())
 
-sent_links = set()
-if os.path.exists(DEDUP_FILE):
-    with open(DEDUP_FILE, "r", encoding="utf-8") as f:
-        sent_links = set(line.strip() for line in f if line.strip())
+print(f"🧠 Loaded {len(sent_links)} sent links")
 
 # ================= WEBSITES =================
 websites = [
@@ -44,15 +45,18 @@ websites = [
     }
 ]
 
-# ================= COLLECT ONLY NEW NEWS =================
-new_news_lines = []
-news_count = 0
+# ================= COLLECT NEW NEWS ONLY =================
+new_news = []
+new_links_found = False
 
 for site in websites:
+    print(f"🔎 Fetching {site['name']}")
+
     try:
         r = requests.get(site["url"], headers=HEADERS, timeout=20)
         r.raise_for_status()
-    except Exception:
+    except Exception as e:
+        print(f"❌ Failed to fetch {site['name']}: {e}")
         continue
 
     soup = BeautifulSoup(r.text, "html.parser")
@@ -81,15 +85,16 @@ for site in websites:
             continue
 
         sent_links.add(full_url)
-        new_news_lines.append(f"{title} - {full_url}")
-        news_count += 1
+        new_links_found = True
+        new_news.append(f"{title} - {full_url}")
         count += 1
 
-# ================= SAVE DEDUP =================
-if news_count > 0:
-    with open(DEDUP_FILE, "w", encoding="utf-8") as f:
-        for link in sorted(sent_links):
-            f.write(link + "\n")
+# ================= SAVE DEDUP (ALWAYS) =================
+with open(DEDUP_FILE, "w", encoding="utf-8") as f:
+    for link in sorted(sent_links):
+        f.write(link + "\n")
+
+print(f"🧠 Dedup file saved with {len(sent_links)} total links")
 
 # ================= TELEGRAM =================
 def send_to_telegram(message):
@@ -101,23 +106,27 @@ def send_to_telegram(message):
         return
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {"chat_id": chat_id, "text": message[:4000]}
+    payload = {
+        "chat_id": chat_id,
+        "text": message[:4000]
+    }
+
     requests.post(url, data=payload)
 
-# ================= SEND CORRECT MESSAGE =================
+# ================= SEND MESSAGE =================
 if SEND_TO_TELEGRAM:
-    if news_count > 0:
+    if new_links_found:
         message = (
             f"Timestamp: {timestamp}\n\n"
             "📰 Tiruppur News Update\n\n" +
-            "\n\n".join(new_news_lines)
+            "\n\n".join(new_news)
         )
         send_to_telegram(message)
-        print(f"🎉 Telegram sent ({news_count} new news)")
+        print(f"🎉 Telegram sent ({len(new_news)} new news)")
     else:
         send_to_telegram(
             f"Timestamp: {timestamp}\n\nℹ️ No new Tiruppur news found."
         )
-        print("ℹ️ No new news – notification sent")
+        print("ℹ️ No new news – Telegram notification sent")
 
 print("✅ Script finished cleanly")
