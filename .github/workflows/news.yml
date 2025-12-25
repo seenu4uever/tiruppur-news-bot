@@ -1,9 +1,13 @@
 name: Tiruppur Daily News Bot
 
+# 🔑 THIS IS THE CRITICAL FIX
+permissions:
+  contents: write
+
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 * * * *"
+    - cron: "0 * * * *"   # runs every hour
 
 jobs:
   run-news:
@@ -12,6 +16,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -23,37 +29,18 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # 🔽 DOWNLOAD ARTIFACT
-      - name: Download sent links artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: sent-links
-          path: .
-        continue-on-error: true
-
-      # 🧪 DEBUG STEP (ADD THIS)
-      - name: Debug sent_links file
-        run: |
-          echo "PWD:"
-          pwd
-          echo "FILES:"
-          ls -la
-          echo "---- sent_links.txt ----"
-          cat sent_links.txt || echo "sent_links.txt NOT FOUND"
-
-      # ▶️ RUN PYTHON
-      - name: Run news bot
+      - name: Run Tiruppur news bot
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           SEND_TO_TELEGRAM: "true"
         run: |
-          cd $GITHUB_WORKSPACE
           python allwebsite.py
 
-      # 🔼 UPLOAD ARTIFACT
-      - name: Upload sent links artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: sent-links
-          path: sent_links.txt
+      - name: Commit sent links (dedup state)
+        run: |
+          git config user.name "tiruppur-news-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add sent_links.txt
+          git commit -m "Update sent links [bot]" || echo "No changes to commit"
+          git push
