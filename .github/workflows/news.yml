@@ -1,33 +1,31 @@
 name: Tiruppur Daily News Bot
 
 on:
-  schedule:
-    - cron: "30 0 * * *"   # 06:00 AM IST
   workflow_dispatch:
+  schedule:
+    - cron: "30 0 * * *"   # Runs daily at 6:00 AM IST
 
 jobs:
-  run-news-bot:
+  run-news:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: "3.11"
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run news script
-        run: python allwebsite.py
-
-      - name: Upload news output as artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: tiruppur-news-output
-          path: news_output/
+      - name: Run news bot and send Telegram message
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python allwebsite.py
