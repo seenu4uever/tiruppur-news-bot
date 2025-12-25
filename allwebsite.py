@@ -6,7 +6,7 @@ import os
 print("🚀 Script started")
 
 # ================= TIME =================
-file_date = datetime.now().strftime("%d-%m-%Y")
+today_date = datetime.now().strftime("%d-%m-%Y")
 timestamp = datetime.now().strftime("%d-%m-%Y %I:%M %p")
 
 # ================= PATH =================
@@ -14,14 +14,9 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 folder_path = os.path.join(BASE_DIR, "news_output")
 os.makedirs(folder_path, exist_ok=True)
 
-file_path = os.path.join(folder_path, f"tiruppur_news_raw_{file_date}.txt")
+file_path = os.path.join(folder_path, f"tiruppur_news_raw_{today_date}.txt")
 
-# ================= CREATE FILE =================
-with open(file_path, "w", encoding="utf-8") as f:
-    f.write(f"Timestamp: {timestamp}\n\nRaw data:\n\n")
-
-print("📄 File created:", file_path)
-
+# ================= HEADERS =================
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 # ================= WEBSITES =================
@@ -32,7 +27,7 @@ websites = [
         "base": "https://www.dinamalar.com",
         "tag": "p",
         "must_contain": "district-news-tiruppur/",
-        "limit": 12
+        "limit": 10
     },
     {
         "name": "Dinamani",
@@ -40,12 +35,14 @@ websites = [
         "base": "https://www.dinamani.com",
         "tag": "h2",
         "must_contain": "/tiruppur/",
-        "limit": 12
+        "limit": 10
     }
 ]
 
-# ================= SCRAPING =================
-with open(file_path, "a", encoding="utf-8") as file:
+# ================= CREATE FILE =================
+with open(file_path, "w", encoding="utf-8") as file:
+    file.write(f"Timestamp: {timestamp}\n\nRaw data:\n\n")
+
     for site in websites:
         print(f"🔎 Fetching {site['name']}")
         file.write(f"{site['name']}:\n\n")
@@ -54,7 +51,6 @@ with open(file_path, "a", encoding="utf-8") as file:
             r = requests.get(site["url"], headers=HEADERS, timeout=20)
         except Exception as e:
             file.write("Request failed\n\n")
-            print("❌ Request failed:", e)
             continue
 
         soup = BeautifulSoup(r.text, "html.parser")
@@ -89,5 +85,29 @@ with open(file_path, "a", encoding="utf-8") as file:
         if count == 0:
             file.write("No news found\n\n")
 
-print("🎉 DONE")
-print("📄 Output saved at:", file_path)
+print("📄 File created:", file_path)
+
+# ================= SEND TO TELEGRAM =================
+def send_to_telegram(message):
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    chat_id = os.getenv("TELEGRAM_CHAT_ID")
+
+    if not token or not chat_id:
+        print("Telegram secrets not set")
+        return
+
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": message[:4000]
+    }
+
+    requests.post(url, data=payload)
+
+
+with open(file_path, "r", encoding="utf-8") as f:
+    news_text = f.read()
+
+send_to_telegram(news_text)
+
+print("🎉 Telegram message sent")
