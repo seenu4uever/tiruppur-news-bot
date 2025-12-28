@@ -13,9 +13,7 @@ DEDUP_FILE = "sent_links.txt"
 
 # ================= TIME (IST) =================
 now = datetime.now()
-MAX_AGE = now - timedelta(days=1)
 DISPLAY_DATE = now.strftime("%d %b %Y")
-TIMESTAMP = now.strftime("%d-%m-%Y %I:%M %p IST")
 
 # ================= OUTPUT FILE (WITH LINKS) =================
 OUTPUT_DIR = "news_output"
@@ -108,7 +106,9 @@ for query, lang in sources:
             continue
 
         ist_dt = gmt_to_ist(entry.get("published", ""))
-        if ist_dt and ist_dt < MAX_AGE:
+
+        # ✅ ONLY TODAY'S NEWS (calendar-based)
+        if ist_dt and ist_dt.date() != now.date():
             continue
 
         title = entry.title.strip()
@@ -146,7 +146,7 @@ if file_news:
             "நம்ம திருப்பூர் வலைதளத்தை பின் தொடரவும்\n"
             "Media & News Company Tirupur\n"
             "Website : www.nammatirupur.in\n\n"
-            f"திருப்பூர் மாவட்ட முக்கிய செய்திகள் ({DISPLAY_DATE})\n"
+            f"திருப்பூர் மாவட்ட மற்றும் முக்கிய செய்திகள் ({DISPLAY_DATE})\n"
             + "=" * 70 + "\n\n"
         )
         f.write("\n".join(file_news))
@@ -161,7 +161,7 @@ if SEND_TO_TELEGRAM:
             "நம்ம திருப்பூர் வலைதளத்தை பின் தொடரவும்\n"
             "Media & News Company Tirupur\n"
             "Website : www.nammatirupur.in\n\n"
-            f"திருப்பூர் மாவட்ட முக்கிய செய்திகள் ({DISPLAY_DATE})\n"
+            f"திருப்பூர் மாவட்ட மற்றும் முக்கிய செய்திகள் ({DISPLAY_DATE})\n"
             + "=" * 70 + "\n\n"
             + "\n\n".join(telegram_news)
         )
