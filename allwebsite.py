@@ -11,10 +11,11 @@ print("🚀 Script started")
 SEND_TO_TELEGRAM = os.getenv("SEND_TO_TELEGRAM") == "true"
 DEDUP_FILE = "sent_links.txt"
 
-# ================= TIME (IST – SAFE) =================
+# ================= TIME (IST) =================
 now = datetime.now()
-timestamp = now.strftime("%d-%m-%Y %I:%M %p IST")
 MAX_AGE = now - timedelta(days=1)
+DISPLAY_DATE = now.strftime("%d %b %Y")
+TIMESTAMP = now.strftime("%d-%m-%Y %I:%M %p IST")
 
 # ================= ENSURE DEDUP FILE EXISTS =================
 if not os.path.exists(DEDUP_FILE):
@@ -39,7 +40,7 @@ def gmt_to_ist(published_str):
 def format_time(dt):
     if not dt:
         return "Time not available"
-    return dt.strftime("%d-%m-%Y %I:%M %p IST")
+    return dt.strftime("%d %b %Y, %I:%M %p IST")
 
 # ================= GOOGLE NEWS =================
 def google_news(query, lang):
@@ -47,7 +48,6 @@ def google_news(query, lang):
         url = f"https://news.google.com/rss/search?q={query}+when:1d&hl=ta-IN&gl=IN&ceid=IN:ta"
     else:
         url = f"https://news.google.com/rss/search?q={query}+when:1d&hl=en-IN&gl=IN&ceid=IN:en"
-
     return feedparser.parse(url).entries
 
 # ================= RESOLVE GOOGLE LINK =================
@@ -56,7 +56,9 @@ def resolve_google_url(url):
         parsed = urlparse(url)
         if "news.google.com" in parsed.netloc:
             qs = parse_qs(parsed.query)
-            return qs.get("url", [url])[0]
+            real = qs.get("url")
+            if real:
+                return real[0]
         return url
     except Exception:
         return url
@@ -70,27 +72,26 @@ def send_to_telegram(message):
         print("❌ Telegram secrets not set")
         return
 
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": message[:4000]
-    }
-
-    requests.post(url, data=payload)
+    requests.post(
+        f"https://api.telegram.org/bot{token}/sendMessage",
+        data={"chat_id": chat_id, "text": message[:4000]}
+    )
 
 # ================= COLLECT NEWS =================
-new_news = []
+telegram_news = []
 new_links = set()
+counter = 1
 
 sources = [
-    ("Tirupur", "en"),
-    ("திருப்பூர்", "ta")
+    ("திருப்பூர்", "ta"),
+    ("Tirupur", "en")
 ]
 
 for query, lang in sources:
     print(f"🔎 Fetching Google News: {query}")
 
     for entry in google_news(query, lang):
+
         real_url = resolve_google_url(entry.link)
 
         if real_url in sent_links or real_url in new_links:
@@ -100,11 +101,18 @@ for query, lang in sources:
         if ist_dt and ist_dt < MAX_AGE:
             continue
 
-        title = entry.title
-        time_str = format_time(ist_dt)
+        title = entry.title.strip()
+        published = format_time(ist_dt)
 
-        new_news.append(f"• {title}\n{real_url}")
+        # TELEGRAM (NO LINKS)
+        telegram_news.append(
+            f"{counter}. {title}\n"
+            f"   Published: {published}"
+        )
+
+        # STORAGE (WITH LINKS)
         new_links.add(real_url)
+        counter += 1
 
 # ================= SAVE DEDUP =================
 if new_links:
@@ -116,18 +124,18 @@ print(f"🧠 Dedup updated (+{len(new_links)} links)")
 
 # ================= SEND TELEGRAM =================
 if SEND_TO_TELEGRAM:
-    if new_news:
+    if telegram_news:
         message = (
-            f"Timestamp: {timestamp}\n\n"
-            "📰 Tiruppur News Update\n\n" +
-            "\n\n".join(new_news)
+            f"திருப்பூர் மாவட்ட முக்கிய செய்திகள் ({DISPLAY_DATE})\n"
+            + "=" * 70 + "\n\n"
+            + "\n\n".join(telegram_news)
         )
         send_to_telegram(message)
-        print(f"🎉 Telegram sent ({len(new_news)} news)")
+        print("📨 Telegram sent (NO LINKS)")
     else:
         send_to_telegram(
-            f"Timestamp: {timestamp}\n\nℹ️ No new Tiruppur news found."
+            f"திருப்பூர் மாவட்ட செய்திகள் ({DISPLAY_DATE})\n\n"
+            "இன்று புதிய செய்திகள் இல்லை."
         )
-        print("ℹ️ No new news")
 
 print("✅ Script finished cleanly")
