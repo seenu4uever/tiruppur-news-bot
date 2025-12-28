@@ -17,6 +17,15 @@ MAX_AGE = now - timedelta(days=1)
 DISPLAY_DATE = now.strftime("%d %b %Y")
 TIMESTAMP = now.strftime("%d-%m-%Y %I:%M %p IST")
 
+# ================= OUTPUT FILE (WITH LINKS) =================
+OUTPUT_DIR = "news_output"
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+OUTPUT_FILE_WITH_LINKS = os.path.join(
+    OUTPUT_DIR,
+    f"tiruppur_news_{now.strftime('%d-%m-%Y')}_WITH_LINKS.txt"
+)
+
 # ================= ENSURE DEDUP FILE EXISTS =================
 if not os.path.exists(DEDUP_FILE):
     open(DEDUP_FILE, "w", encoding="utf-8").close()
@@ -78,7 +87,8 @@ def send_to_telegram(message):
     )
 
 # ================= COLLECT NEWS =================
-telegram_news = []
+telegram_news = []   # NO LINKS
+file_news = []       # WITH LINKS
 new_links = set()
 counter = 1
 
@@ -110,7 +120,13 @@ for query, lang in sources:
             f"   Published: {published}"
         )
 
-        # STORAGE (WITH LINKS)
+        # FILE (WITH LINKS)
+        file_news.append(
+            f"{counter}. {title}\n"
+            f"   Published: {published}\n"
+            f"   Link: {real_url}\n"
+        )
+
         new_links.add(real_url)
         counter += 1
 
@@ -122,10 +138,29 @@ if new_links:
 
 print(f"🧠 Dedup updated (+{len(new_links)} links)")
 
+# ================= WRITE WITH LINKS FILE =================
+if file_news:
+    with open(OUTPUT_FILE_WITH_LINKS, "w", encoding="utf-8") as f:
+        f.write(
+            "திருப்பூர் மாவட்ட செய்திகள் மற்றும் முக்கிய தகவல்களை பெற\n"
+            "நம்ம திருப்பூர் வலைதளத்தை பின் தொடரவும்\n"
+            "Media & News Company Tirupur\n"
+            "Website : www.nammatirupur.in\n\n"
+            f"திருப்பூர் மாவட்ட முக்கிய செய்திகள் ({DISPLAY_DATE})\n"
+            + "=" * 70 + "\n\n"
+        )
+        f.write("\n".join(file_news))
+
+    print(f"📝 WITH-LINKS file created: {OUTPUT_FILE_WITH_LINKS}")
+
 # ================= SEND TELEGRAM =================
 if SEND_TO_TELEGRAM:
     if telegram_news:
         message = (
+            "திருப்பூர் மாவட்ட செய்திகள் மற்றும் முக்கிய தகவல்களை பெற\n"
+            "நம்ம திருப்பூர் வலைதளத்தை பின் தொடரவும்\n"
+            "Media & News Company Tirupur\n"
+            "Website : www.nammatirupur.in\n\n"
             f"திருப்பூர் மாவட்ட முக்கிய செய்திகள் ({DISPLAY_DATE})\n"
             + "=" * 70 + "\n\n"
             + "\n\n".join(telegram_news)
