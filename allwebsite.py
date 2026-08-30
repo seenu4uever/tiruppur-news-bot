@@ -9,6 +9,11 @@ print("🚀 Script started")
 
 # ================= CONFIG =================
 SEND_TO_TELEGRAM = os.getenv("SEND_TO_TELEGRAM") == "true"
+# Personal chat copy WITH links -- restores what used to be sent to the
+# "Tiruppur news bot" 1:1 chat before the automated pipeline (Dec 2025)
+# only ever wired up the no-links channel post. Optional: if unset, this
+# second send is simply skipped, no error.
+TELEGRAM_PERSONAL_CHAT_ID = os.getenv("TELEGRAM_PERSONAL_CHAT_ID")
 DEDUP_FILE = "sent_links.txt"
 DEDUP_RETENTION_DAYS = 30  # links older than this can never match a when:1d query again
 TELEGRAM_MAX_LEN = 4000
@@ -101,9 +106,9 @@ def resolve_google_url(url):
         return url
 
 # ================= TELEGRAM =================
-def send_to_telegram(message):
+def send_to_telegram(message, chat_id=None):
     token = os.getenv("TELEGRAM_BOT_TOKEN")
-    chat_id = os.getenv("TELEGRAM_CHAT_ID")
+    chat_id = chat_id or os.getenv("TELEGRAM_CHAT_ID")
 
     if not token or not chat_id:
         print("❌ Telegram secrets not set")
@@ -126,8 +131,9 @@ def send_to_telegram(message):
         return False
 
 # ================= COLLECT NEWS =================
-telegram_news = []   # NO LINKS
-file_news = []       # WITH LINKS
+telegram_news = []            # NO LINKS -- posted to the public channel
+telegram_news_with_links = [] # WITH LINKS -- posted to the personal chat
+file_news = []                 # WITH LINKS -- written to the local artifact file
 new_links = set()
 counter = 1
 
@@ -159,6 +165,13 @@ for query, lang in sources:
         telegram_news.append(
             f"{counter}. {title}\n"
             f"   Published: {published}"
+        )
+
+        # TELEGRAM (WITH LINKS, personal chat)
+        telegram_news_with_links.append(
+            f"{counter}. {title}\n"
+            f"   Published: {published}\n"
+            f"   Link: {real_url}"
         )
 
         # FILE (WITH LINKS)
@@ -245,5 +258,24 @@ if SEND_TO_TELEGRAM:
 if not telegram_ok:
     print("❌ Script finished with Telegram send failure")
     raise SystemExit(1)
+
+# ================= SEND PERSONAL COPY (WITH LINKS) =================
+# Non-fatal: this is a bonus convenience copy, not the primary delivery.
+# A failure here (e.g. you haven't messaged the bot recently) shouldn't
+# fail the whole run.
+if SEND_TO_TELEGRAM and TELEGRAM_PERSONAL_CHAT_ID:
+    if telegram_news_with_links:
+        personal_messages = chunk_items(HEADER, telegram_news_with_links, TELEGRAM_MAX_LEN)
+        for i, msg in enumerate(personal_messages, 1):
+            if len(personal_messages) > 1:
+                msg += f"\n\n(part {i}/{len(personal_messages)})"
+            if not send_to_telegram(msg, chat_id=TELEGRAM_PERSONAL_CHAT_ID):
+                print("⚠️ Personal with-links copy failed to send (non-fatal)")
+    else:
+        send_to_telegram(
+            f"திருப்பூர் மாவட்ட செய்திகள் ({DISPLAY_DATE})\n\n"
+            "இன்று புதிய செய்திகள் இல்லை.",
+            chat_id=TELEGRAM_PERSONAL_CHAT_ID
+        )
 
 print("✅ Script finished cleanly")

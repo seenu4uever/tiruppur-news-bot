@@ -33,6 +33,7 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_PERSONAL_CHAT_ID: "603719168"
           SEND_TO_TELEGRAM: "true"
         run: |
           python allwebsite.py
