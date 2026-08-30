@@ -77,12 +77,23 @@ def send_to_telegram(message):
 
     if not token or not chat_id:
         print("❌ Telegram secrets not set")
-        return
+        return False
 
-    requests.post(
-        f"https://api.telegram.org/bot{token}/sendMessage",
-        data={"chat_id": chat_id, "text": message[:4000]}
-    )
+    try:
+        resp = requests.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            data={"chat_id": chat_id, "text": message[:4000]},
+            timeout=15
+        )
+        result = resp.json()
+        if not result.get("ok"):
+            print(f"❌ Telegram API rejected the message: {resp.status_code} {result}")
+            return False
+        print(f"✅ Telegram accepted message_id={result['result']['message_id']}")
+        return True
+    except Exception as e:
+        print(f"❌ Telegram send failed with exception: {e}")
+        return False
 
 # ================= COLLECT NEWS =================
 telegram_news = []   # NO LINKS
@@ -154,6 +165,7 @@ if file_news:
     print(f"📝 WITH-LINKS file created: {OUTPUT_FILE_WITH_LINKS}")
 
 # ================= SEND TELEGRAM =================
+telegram_ok = True
 if SEND_TO_TELEGRAM:
     if telegram_news:
         message = (
@@ -165,12 +177,15 @@ if SEND_TO_TELEGRAM:
             + "=" * 70 + "\n\n"
             + "\n\n".join(telegram_news)
         )
-        send_to_telegram(message)
-        print("📨 Telegram sent (NO LINKS)")
+        telegram_ok = send_to_telegram(message)
     else:
-        send_to_telegram(
+        telegram_ok = send_to_telegram(
             f"திருப்பூர் மாவட்ட செய்திகள் ({DISPLAY_DATE})\n\n"
             "இன்று புதிய செய்திகள் இல்லை."
         )
+
+if not telegram_ok:
+    print("❌ Script finished with Telegram send failure")
+    raise SystemExit(1)
 
 print("✅ Script finished cleanly")
