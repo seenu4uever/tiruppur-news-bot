@@ -10,6 +10,8 @@ print("🚀 Script started")
 # ================= CONFIG =================
 SEND_TO_TELEGRAM = os.getenv("SEND_TO_TELEGRAM") == "true"
 DEDUP_FILE = "sent_links.txt"
+DEDUP_RETENTION_DAYS = 30  # links older than this can never match a when:1d query again
+TELEGRAM_MAX_LEN = 4000
 
 # ================= TIME (IST) =================
 now = datetime.now()
@@ -29,10 +31,31 @@ if not os.path.exists(DEDUP_FILE):
     open(DEDUP_FILE, "w", encoding="utf-8").close()
 
 # ================= LOAD SENT LINKS =================
-with open(DEDUP_FILE, "r", encoding="utf-8") as f:
-    sent_links = set(line.strip() for line in f if line.strip())
+# Format: "YYYY-MM-DD|url" per line. A link can never be re-matched by a
+# when:1d query once it's more than a day or two old, so anything past
+# DEDUP_RETENTION_DAYS is pure dead weight -- pruned on every run to keep
+# this file (and the repo's commit history) from growing forever.
+# Lines from before this format existed (no "|") are already far older
+# than the retention window by definition, so they're dropped outright.
+today_date = now.date()
+sent_links = set()
+kept_entries = []  # (date_str, url) pairs surviving the prune
 
-print(f"🧠 Loaded {len(sent_links)} sent links")
+with open(DEDUP_FILE, "r", encoding="utf-8") as f:
+    for line in f:
+        line = line.strip()
+        if not line or "|" not in line:
+            continue
+        date_str, url = line.split("|", 1)
+        try:
+            entry_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        if (today_date - entry_date).days <= DEDUP_RETENTION_DAYS:
+            kept_entries.append((date_str, url))
+            sent_links.add(url)
+
+print(f"🧠 Loaded {len(sent_links)} sent links (pruned to last {DEDUP_RETENTION_DAYS} days)")
 
 # ================= TIME CONVERSION =================
 def gmt_to_ist(published_str):
@@ -55,7 +78,14 @@ def google_news(query, lang):
         url = f"https://news.google.com/rss/search?q={query}+when:1d&hl=ta-IN&gl=IN&ceid=IN:ta"
     else:
         url = f"https://news.google.com/rss/search?q={query}+when:1d&hl=en-IN&gl=IN&ceid=IN:en"
-    return feedparser.parse(url).entries
+    try:
+        feed = feedparser.parse(url)
+    except Exception as e:
+        print(f"❌ Failed to fetch/parse feed for '{query}': {e}")
+        return []
+    if feed.bozo:
+        print(f"⚠️ Feed for '{query}' parsed with warnings: {feed.bozo_exception}")
+    return feed.entries
 
 # ================= RESOLVE GOOGLE LINK =================
 def resolve_google_url(url):
@@ -82,7 +112,7 @@ def send_to_telegram(message):
     try:
         resp = requests.post(
             f"https://api.telegram.org/bot{token}/sendMessage",
-            data={"chat_id": chat_id, "text": message[:4000]},
+            data={"chat_id": chat_id, "text": message},
             timeout=15
         )
         result = resp.json()
@@ -141,13 +171,16 @@ for query, lang in sources:
         new_links.add(real_url)
         counter += 1
 
-# ================= SAVE DEDUP =================
-if new_links:
-    with open(DEDUP_FILE, "a", encoding="utf-8", newline="\n") as f:
-        for link in sorted(new_links):
-            f.write(link + "\n")
+# ================= SAVE DEDUP (rewrite, pruned) =================
+today_str = now.strftime("%Y-%m-%d")
+for link in sorted(new_links):
+    kept_entries.append((today_str, link))
 
-print(f"🧠 Dedup updated (+{len(new_links)} links)")
+with open(DEDUP_FILE, "w", encoding="utf-8", newline="\n") as f:
+    for date_str, url in kept_entries:
+        f.write(f"{date_str}|{url}\n")
+
+print(f"🧠 Dedup updated (+{len(new_links)} links, {len(kept_entries)} total after pruning)")
 
 # ================= WRITE WITH LINKS FILE =================
 if file_news:
@@ -164,20 +197,45 @@ if file_news:
 
     print(f"📝 WITH-LINKS file created: {OUTPUT_FILE_WITH_LINKS}")
 
+HEADER = (
+    "திருப்பூர் மாவட்ட செய்திகள் மற்றும் முக்கிய தகவல்களை பெற\n"
+    "நம்ம திருப்பூர் வலைதளத்தை பின் தொடரவும்\n"
+    "Media & News Company Tirupur\n"
+    "Website : www.nammatirupur.in\n\n"
+    f"திருப்பூர் மாவட்ட மற்றும் முக்கிய செய்திகள் ({DISPLAY_DATE})\n"
+    + "=" * 70 + "\n\n"
+)
+
+
+def chunk_items(header, items, max_len):
+    """Group items into message chunks that each stay under max_len,
+    repeating the header on every chunk so each message stands alone."""
+    chunks = []
+    current = []
+    current_len = len(header)
+    for item in items:
+        item_len = len(item) + 2  # +2 for the "\n\n" join separator
+        if current and current_len + item_len > max_len:
+            chunks.append(header + "\n\n".join(current))
+            current = []
+            current_len = len(header)
+        current.append(item)
+        current_len += item_len
+    if current:
+        chunks.append(header + "\n\n".join(current))
+    return chunks
+
+
 # ================= SEND TELEGRAM =================
 telegram_ok = True
 if SEND_TO_TELEGRAM:
     if telegram_news:
-        message = (
-            "திருப்பூர் மாவட்ட செய்திகள் மற்றும் முக்கிய தகவல்களை பெற\n"
-            "நம்ம திருப்பூர் வலைதளத்தை பின் தொடரவும்\n"
-            "Media & News Company Tirupur\n"
-            "Website : www.nammatirupur.in\n\n"
-            f"திருப்பூர் மாவட்ட மற்றும் முக்கிய செய்திகள் ({DISPLAY_DATE})\n"
-            + "=" * 70 + "\n\n"
-            + "\n\n".join(telegram_news)
-        )
-        telegram_ok = send_to_telegram(message)
+        messages = chunk_items(HEADER, telegram_news, TELEGRAM_MAX_LEN)
+        for i, msg in enumerate(messages, 1):
+            if len(messages) > 1:
+                msg += f"\n\n(part {i}/{len(messages)})"
+            if not send_to_telegram(msg):
+                telegram_ok = False
     else:
         telegram_ok = send_to_telegram(
             f"திருப்பூர் மாவட்ட செய்திகள் ({DISPLAY_DATE})\n\n"
