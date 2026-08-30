@@ -1,5 +1,6 @@
 import feedparser
 import os
+import re
 import email.utils
 import requests
 from datetime import datetime, timedelta
@@ -105,6 +106,30 @@ def resolve_google_url(url):
     except Exception:
         return url
 
+# ================= EXTRACT ARTICLE IMAGE =================
+OG_IMAGE_RE = re.compile(
+    r'<meta[^>]+(?:property|name)=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']'
+    r'|<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:property|name)=["\']og:image["\']',
+    re.IGNORECASE
+)
+BROWSER_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+}
+
+def extract_og_image(url):
+    """Best-effort fetch of an article's og:image. Returns None on any
+    failure (timeout, blocked, no tag found) -- never raises, since a
+    missing image just means falling back to a text-only post."""
+    try:
+        resp = requests.get(url, headers=BROWSER_HEADERS, timeout=8)
+        match = OG_IMAGE_RE.search(resp.text)
+        if match:
+            return match.group(1) or match.group(2)
+    except Exception:
+        pass
+    return None
+
 # ================= TELEGRAM =================
 def send_to_telegram(message, chat_id=None):
     token = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -130,10 +155,39 @@ def send_to_telegram(message, chat_id=None):
         print(f"❌ Telegram send failed with exception: {e}")
         return False
 
+
+def send_photo_to_telegram(photo_url, caption, chat_id=None):
+    """Send one article as a photo+caption post. Telegram fetches the
+    image server-side from photo_url -- no download/upload needed here.
+    Returns False (never raises) so a bad image URL just triggers a
+    text-only fallback rather than losing the article entirely."""
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    chat_id = chat_id or os.getenv("TELEGRAM_CHAT_ID")
+
+    if not token or not chat_id:
+        print("❌ Telegram secrets not set")
+        return False
+
+    try:
+        resp = requests.post(
+            f"https://api.telegram.org/bot{token}/sendPhoto",
+            data={"chat_id": chat_id, "photo": photo_url, "caption": caption[:1024]},
+            timeout=20
+        )
+        result = resp.json()
+        if not result.get("ok"):
+            print(f"⚠️ Telegram rejected photo ({photo_url}): {resp.status_code} {result}")
+            return False
+        print(f"✅ Telegram photo accepted message_id={result['result']['message_id']}")
+        return True
+    except Exception as e:
+        print(f"⚠️ Telegram photo send failed with exception: {e}")
+        return False
+
 # ================= COLLECT NEWS =================
-telegram_news = []            # NO LINKS -- posted to the public channel
-telegram_news_with_links = [] # WITH LINKS -- posted to the personal chat
-file_news = []                 # WITH LINKS -- written to the local artifact file
+telegram_news = []       # NO LINKS -- posted to the public channel (combined digest)
+personal_articles = []   # WITH LINKS + image -- one Telegram post per article
+file_news = []           # WITH LINKS -- written to the local artifact file
 new_links = set()
 counter = 1
 
@@ -167,12 +221,16 @@ for query, lang in sources:
             f"   Published: {published}"
         )
 
-        # TELEGRAM (WITH LINKS, personal chat)
-        telegram_news_with_links.append(
-            f"{counter}. {title}\n"
-            f"   Published: {published}\n"
-            f"   Link: {real_url}"
-        )
+        # PERSONAL CHAT (WITH LINKS + image, one post per article)
+        image_url = None
+        if SEND_TO_TELEGRAM and TELEGRAM_PERSONAL_CHAT_ID:
+            image_url = extract_og_image(real_url)
+        personal_articles.append({
+            "title": title,
+            "published": published,
+            "link": real_url,
+            "image": image_url,
+        })
 
         # FILE (WITH LINKS)
         file_news.append(
@@ -259,18 +317,21 @@ if not telegram_ok:
     print("❌ Script finished with Telegram send failure")
     raise SystemExit(1)
 
-# ================= SEND PERSONAL COPY (WITH LINKS) =================
-# Non-fatal: this is a bonus convenience copy, not the primary delivery.
-# A failure here (e.g. you haven't messaged the bot recently) shouldn't
-# fail the whole run.
+# ================= SEND PERSONAL COPY (WITH LINKS + IMAGES) =================
+# Non-fatal: this is a bonus convenience feed for content creation, not
+# the primary delivery. One post per article (photo+caption when an
+# og:image was found, plain text otherwise) rather than a combined
+# digest, since each article stands alone as potential social content.
 if SEND_TO_TELEGRAM and TELEGRAM_PERSONAL_CHAT_ID:
-    if telegram_news_with_links:
-        personal_messages = chunk_items(HEADER, telegram_news_with_links, TELEGRAM_MAX_LEN)
-        for i, msg in enumerate(personal_messages, 1):
-            if len(personal_messages) > 1:
-                msg += f"\n\n(part {i}/{len(personal_messages)})"
-            if not send_to_telegram(msg, chat_id=TELEGRAM_PERSONAL_CHAT_ID):
-                print("⚠️ Personal with-links copy failed to send (non-fatal)")
+    if personal_articles:
+        for art in personal_articles:
+            caption = f"{art['title']}\nPublished: {art['published']}\nLink: {art['link']}"
+            sent = False
+            if art["image"]:
+                sent = send_photo_to_telegram(art["image"], caption, chat_id=TELEGRAM_PERSONAL_CHAT_ID)
+            if not sent:
+                if not send_to_telegram(caption, chat_id=TELEGRAM_PERSONAL_CHAT_ID):
+                    print(f"⚠️ Personal copy failed for: {art['title']} (non-fatal)")
     else:
         send_to_telegram(
             f"திருப்பூர் மாவட்ட செய்திகள் ({DISPLAY_DATE})\n\n"
