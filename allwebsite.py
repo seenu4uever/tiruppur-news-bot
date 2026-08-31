@@ -249,22 +249,16 @@ for query, lang in sources:
         title = entry.title.strip()
         published = format_time(ist_dt)
 
-        # Single fetch serves both the channel digest (needs a short
-        # paragraph, not just the headline) and the personal chat (needs
-        # an image) -- avoids fetching the same URL twice.
-        image_url, description = (None, None)
-        if SEND_TO_TELEGRAM:
-            image_url, description = fetch_article_meta(real_url)
-
-        # TELEGRAM (NO LINKS) -- short paragraph when available, headline-only otherwise
-        summary_line = f"   {description}\n" if description else ""
+        # TELEGRAM (NO LINKS)
         telegram_news.append(
             f"{counter}. {title}\n"
-            f"{summary_line}"
             f"   Published: {published}"
         )
 
         # PERSONAL CHAT (WITH LINKS + image, one post per article)
+        image_url = None
+        if SEND_TO_TELEGRAM and TELEGRAM_PERSONAL_CHAT_ID:
+            image_url, _ = fetch_article_meta(real_url)
         personal_articles.append({
             "title": title,
             "published": published,
