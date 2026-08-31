@@ -106,10 +106,22 @@ def resolve_google_url(url):
     except Exception:
         return url
 
-# ================= EXTRACT ARTICLE IMAGE =================
+# ================= EXTRACT ARTICLE IMAGE + DESCRIPTION =================
 OG_IMAGE_RE = re.compile(
     r'<meta[^>]+(?:property|name)=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']'
     r'|<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:property|name)=["\']og:image["\']',
+    re.IGNORECASE
+)
+# og:description first (publisher-written summary for social sharing), then
+# plain <meta name="description"> as a fallback for sites that only set that.
+OG_DESC_RE = re.compile(
+    r'<meta[^>]+(?:property|name)=["\']og:description["\'][^>]+content=["\']([^"\']+)["\']'
+    r'|<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:property|name)=["\']og:description["\']',
+    re.IGNORECASE
+)
+DESC_FALLBACK_RE = re.compile(
+    r'<meta[^>]+name=["\']description["\'][^>]+content=["\']([^"\']+)["\']'
+    r'|<meta[^>]+content=["\']([^"\']+)["\'][^>]+name=["\']description["\']',
     re.IGNORECASE
 )
 BROWSER_HEADERS = {
@@ -117,18 +129,40 @@ BROWSER_HEADERS = {
                   "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"
 }
 
-def extract_og_image(url):
-    """Best-effort fetch of an article's og:image. Returns None on any
-    failure (timeout, blocked, no tag found) -- never raises, since a
-    missing image just means falling back to a text-only post."""
+
+def _unescape_html(text):
+    return (text.replace("&amp;", "&").replace("&quot;", '"').replace("&#39;", "'")
+                .replace("&lt;", "<").replace("&gt;", ">"))
+
+
+TRAILING_HASHTAGS_RE = re.compile(r'(\s*#\S+)+\s*$')
+
+
+def _clean_description(text):
+    """Strip a trailing cluster of #hashtags many sites append to their
+    social-share description -- noise for a readable news paragraph."""
+    return TRAILING_HASHTAGS_RE.sub('', text).strip()
+
+
+def fetch_article_meta(url):
+    """Best-effort single fetch of an article's og:image and a short
+    description (og:description, falling back to the plain description
+    meta tag). Returns (image_url_or_None, description_or_None) -- never
+    raises, since a missing field just means falling back to title-only."""
     try:
         resp = requests.get(url, headers=BROWSER_HEADERS, timeout=8)
-        match = OG_IMAGE_RE.search(resp.text)
-        if match:
-            return match.group(1) or match.group(2)
+        html = resp.text
+        img_match = OG_IMAGE_RE.search(html)
+        image = (img_match.group(1) or img_match.group(2)) if img_match else None
+
+        desc_match = OG_DESC_RE.search(html) or DESC_FALLBACK_RE.search(html)
+        description = None
+        if desc_match:
+            description = _clean_description(_unescape_html(desc_match.group(1) or desc_match.group(2)))
+
+        return image, description
     except Exception:
-        pass
-    return None
+        return None, None
 
 # ================= TELEGRAM =================
 def send_to_telegram(message, chat_id=None):
@@ -215,16 +249,22 @@ for query, lang in sources:
         title = entry.title.strip()
         published = format_time(ist_dt)
 
-        # TELEGRAM (NO LINKS)
+        # Single fetch serves both the channel digest (needs a short
+        # paragraph, not just the headline) and the personal chat (needs
+        # an image) -- avoids fetching the same URL twice.
+        image_url, description = (None, None)
+        if SEND_TO_TELEGRAM:
+            image_url, description = fetch_article_meta(real_url)
+
+        # TELEGRAM (NO LINKS) -- short paragraph when available, headline-only otherwise
+        summary_line = f"   {description}\n" if description else ""
         telegram_news.append(
             f"{counter}. {title}\n"
+            f"{summary_line}"
             f"   Published: {published}"
         )
 
         # PERSONAL CHAT (WITH LINKS + image, one post per article)
-        image_url = None
-        if SEND_TO_TELEGRAM and TELEGRAM_PERSONAL_CHAT_ID:
-            image_url = extract_og_image(real_url)
         personal_articles.append({
             "title": title,
             "published": published,
