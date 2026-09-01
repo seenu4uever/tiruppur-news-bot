@@ -111,8 +111,6 @@ def scrape_site(site):
         print(f"❌ Failed to fetch {site['name']}: {e}")
         return []
 
-    print(f"   DEBUG {site['name']}: resp_len={len(resp.text)} has_h4={'MuiTypography-h4' in resp.text}")
-
     soup = BeautifulSoup(resp.text, "html.parser")
     best = {}
     for a in soup.find_all("a", href=True):
@@ -128,7 +126,9 @@ def scrape_site(site):
             continue
         if href not in best or len(title) > len(best[href]):
             best[href] = title
-    return list(best.items())
+    # best is {href: title} -- .items() yields (href, title), so flip to
+    # match this function's documented (title, url) contract every caller relies on.
+    return [(title, href) for href, title in best.items()]
 
 
 # ================= EXTRACT ARTICLE IMAGE + DESCRIPTION =================
@@ -241,8 +241,6 @@ for site in SITES:
     print(f"🔎 Scraping: {site['name']}")
     articles = scrape_site(site)
     print(f"   found {len(articles)} article link(s)")
-    for t, u in articles[:3]:
-        print(f"   DEBUG title_len={len(t)} is_url={t.startswith('http')} title={t!r}")
 
     for title, url in articles:
         if url in sent_links or url in new_links:
