@@ -241,6 +241,8 @@ for site in SITES:
     print(f"🔎 Scraping: {site['name']}")
     articles = scrape_site(site)
     print(f"   found {len(articles)} article link(s)")
+    for t, u in articles[:3]:
+        print(f"   DEBUG title_len={len(t)} is_url={t.startswith('http')} title={t!r}")
 
     for title, url in articles:
         if url in sent_links or url in new_links:
