@@ -1,10 +1,9 @@
-import feedparser
 import os
 import re
-import email.utils
 import requests
-from datetime import datetime, timedelta
-from urllib.parse import urlparse, parse_qs
+from datetime import datetime
+from urllib.parse import urljoin
+from bs4 import BeautifulSoup
 
 print("🚀 Script started")
 
@@ -16,8 +15,13 @@ SEND_TO_TELEGRAM = os.getenv("SEND_TO_TELEGRAM") == "true"
 # second send is simply skipped, no error.
 TELEGRAM_PERSONAL_CHAT_ID = os.getenv("TELEGRAM_PERSONAL_CHAT_ID")
 DEDUP_FILE = "sent_links.txt"
-DEDUP_RETENTION_DAYS = 30  # links older than this can never match a when:1d query again
+DEDUP_RETENTION_DAYS = 30
 TELEGRAM_MAX_LEN = 4000
+
+BROWSER_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+}
 
 # ================= TIME (IST) =================
 now = datetime.now()
@@ -26,10 +30,8 @@ DISPLAY_DATE = now.strftime("%d %b %Y")
 # ================= OUTPUT FILE (WITH LINKS) =================
 OUTPUT_DIR = "news_output"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
-
 OUTPUT_FILE_WITH_LINKS = os.path.join(
-    OUTPUT_DIR,
-    f"tiruppur_news_{now.strftime('%d-%m-%Y')}_WITH_LINKS.txt"
+    OUTPUT_DIR, f"tiruppur_news_{now.strftime('%d-%m-%Y')}_WITH_LINKS.txt"
 )
 
 # ================= ENSURE DEDUP FILE EXISTS =================
@@ -37,15 +39,11 @@ if not os.path.exists(DEDUP_FILE):
     open(DEDUP_FILE, "w", encoding="utf-8").close()
 
 # ================= LOAD SENT LINKS =================
-# Format: "YYYY-MM-DD|url" per line. A link can never be re-matched by a
-# when:1d query once it's more than a day or two old, so anything past
-# DEDUP_RETENTION_DAYS is pure dead weight -- pruned on every run to keep
-# this file (and the repo's commit history) from growing forever.
-# Lines from before this format existed (no "|") are already far older
-# than the retention window by definition, so they're dropped outright.
+# Format: "YYYY-MM-DD|url" per line, pruned to the last DEDUP_RETENTION_DAYS
+# on every run to keep this file (and the repo's commit history) bounded.
 today_date = now.date()
 sent_links = set()
-kept_entries = []  # (date_str, url) pairs surviving the prune
+kept_entries = []
 
 with open(DEDUP_FILE, "r", encoding="utf-8") as f:
     for line in f:
@@ -63,48 +61,73 @@ with open(DEDUP_FILE, "r", encoding="utf-8") as f:
 
 print(f"🧠 Loaded {len(sent_links)} sent links (pruned to last {DEDUP_RETENTION_DAYS} days)")
 
-# ================= TIME CONVERSION =================
-def gmt_to_ist(published_str):
-    try:
-        dt = email.utils.parsedate_to_datetime(published_str)
-        if dt.tzinfo:
-            dt = dt.replace(tzinfo=None)
-        return dt + timedelta(hours=5, minutes=30)
-    except Exception:
-        return None
+# ================= NEWS SOURCES =================
+# Direct site scraping, not Google News -- Google's RSS links mostly can't
+# be resolved to the real publisher page without executing JS, so any
+# "summary" fetched from them was Google's own generic boilerplate, not
+# real per-article content (found 2026-08-31). These 3 sites' own listing
+# and article pages are the real thing, so their og:description/og:image
+# are genuinely per-article. Dailythanthi's old district-page URL now
+# redirects to its generic homepage -- dropped until a working URL is found.
+SITES = [
+    {
+        "name": "Dinamalar",
+        "url": "https://www.dinamalar.com/news/tamil-nadu-district-news-tiruppur",
+        "must_contain": "district-news-tiruppur/",
+    },
+    {
+        "name": "Dinakaran",
+        "url": "https://www.dinakaran.com/district/tiruppur",
+        "must_contain": "tiruppur",
+        "exclude_exact": "https://www.dinakaran.com/district/tiruppur",
+    },
+    {
+        "name": "Dinamani",
+        "url": "https://www.dinamani.com/all-editions/edition-coimbatore/tiruppur",
+        "must_contain": "/tiruppur/",
+        "require_substr": "/20",  # article URLs embed a year, category nav links don't
+    },
+]
 
-def format_time(dt):
-    if not dt:
-        return "Time not available"
-    return dt.strftime("%d %b %Y, %I:%M %p IST")
+TITLE_PREFIX_DUPE_RE = re.compile(r'^(திருப்பூர்)(?=[஀-௿])')
 
-# ================= GOOGLE NEWS =================
-def google_news(query, lang):
-    if lang == "ta":
-        url = f"https://news.google.com/rss/search?q={query}+when:1d&hl=ta-IN&gl=IN&ceid=IN:ta"
-    else:
-        url = f"https://news.google.com/rss/search?q={query}+when:1d&hl=en-IN&gl=IN&ceid=IN:en"
+
+def clean_title(title):
+    """Some listing pages concatenate the category label directly onto
+    the headline with no separator (e.g. 'திருப்பூர்பல்லடம்...') -- strip
+    that duplicate leading category word when glued straight onto Tamil
+    text with no space."""
+    return TITLE_PREFIX_DUPE_RE.sub('', title).strip()
+
+
+def scrape_site(site):
+    """Fetch a site's Tirupur listing page and return [(title, url), ...],
+    deduped by URL (keeping the longest title seen, since some pages have
+    both a thumbnail link and a text link pointing at the same article)."""
     try:
-        feed = feedparser.parse(url)
+        resp = requests.get(site["url"], headers=BROWSER_HEADERS, timeout=15)
+        resp.raise_for_status()
     except Exception as e:
-        print(f"❌ Failed to fetch/parse feed for '{query}': {e}")
+        print(f"❌ Failed to fetch {site['name']}: {e}")
         return []
-    if feed.bozo:
-        print(f"⚠️ Feed for '{query}' parsed with warnings: {feed.bozo_exception}")
-    return feed.entries
 
-# ================= RESOLVE GOOGLE LINK =================
-def resolve_google_url(url):
-    try:
-        parsed = urlparse(url)
-        if "news.google.com" in parsed.netloc:
-            qs = parse_qs(parsed.query)
-            real = qs.get("url")
-            if real:
-                return real[0]
-        return url
-    except Exception:
-        return url
+    soup = BeautifulSoup(resp.text, "html.parser")
+    best = {}
+    for a in soup.find_all("a", href=True):
+        href = urljoin(site["url"], a["href"])
+        if site["must_contain"] not in href:
+            continue
+        if site.get("require_substr") and site["require_substr"] not in href:
+            continue
+        if site.get("exclude_exact") and href.rstrip("/") == site["exclude_exact"].rstrip("/"):
+            continue
+        title = clean_title(a.get_text(strip=True))
+        if not title or len(title) < 5:
+            continue
+        if href not in best or len(title) > len(best[href]):
+            best[href] = title
+    return list(best.items())
+
 
 # ================= EXTRACT ARTICLE IMAGE + DESCRIPTION =================
 OG_IMAGE_RE = re.compile(
@@ -112,8 +135,6 @@ OG_IMAGE_RE = re.compile(
     r'|<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:property|name)=["\']og:image["\']',
     re.IGNORECASE
 )
-# og:description first (publisher-written summary for social sharing), then
-# plain <meta name="description"> as a fallback for sites that only set that.
 OG_DESC_RE = re.compile(
     r'<meta[^>]+(?:property|name)=["\']og:description["\'][^>]+content=["\']([^"\']+)["\']'
     r'|<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:property|name)=["\']og:description["\']',
@@ -124,10 +145,7 @@ DESC_FALLBACK_RE = re.compile(
     r'|<meta[^>]+content=["\']([^"\']+)["\'][^>]+name=["\']description["\']',
     re.IGNORECASE
 )
-BROWSER_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                  "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"
-}
+TRAILING_HASHTAGS_RE = re.compile(r'(\s*#\S+)+\s*$')
 
 
 def _unescape_html(text):
@@ -135,20 +153,15 @@ def _unescape_html(text):
                 .replace("&lt;", "<").replace("&gt;", ">"))
 
 
-TRAILING_HASHTAGS_RE = re.compile(r'(\s*#\S+)+\s*$')
-
-
 def _clean_description(text):
-    """Strip a trailing cluster of #hashtags many sites append to their
-    social-share description -- noise for a readable news paragraph."""
     return TRAILING_HASHTAGS_RE.sub('', text).strip()
 
 
 def fetch_article_meta(url):
-    """Best-effort single fetch of an article's og:image and a short
-    description (og:description, falling back to the plain description
-    meta tag). Returns (image_url_or_None, description_or_None) -- never
-    raises, since a missing field just means falling back to title-only."""
+    """Best-effort single fetch of a real article's og:image and
+    description. Returns (image_url_or_None, description_or_None) --
+    never raises, since a missing field just means falling back to
+    title-only."""
     try:
         resp = requests.get(url, headers=BROWSER_HEADERS, timeout=8)
         html = resp.text
@@ -163,6 +176,7 @@ def fetch_article_meta(url):
         return image, description
     except Exception:
         return None, None
+
 
 # ================= TELEGRAM =================
 def send_to_telegram(message, chat_id=None):
@@ -191,10 +205,6 @@ def send_to_telegram(message, chat_id=None):
 
 
 def send_photo_to_telegram(photo_url, caption, chat_id=None):
-    """Send one article as a photo+caption post. Telegram fetches the
-    image server-side from photo_url -- no download/upload needed here.
-    Returns False (never raises) so a bad image URL just triggers a
-    text-only fallback rather than losing the article entirely."""
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     chat_id = chat_id or os.getenv("TELEGRAM_CHAT_ID")
 
@@ -219,61 +229,48 @@ def send_photo_to_telegram(photo_url, caption, chat_id=None):
         return False
 
 # ================= COLLECT NEWS =================
-telegram_news = []       # NO LINKS -- posted to the public channel (combined digest)
+telegram_news = []       # NO LINKS -- posted to the public channel (combined digest, now with real paragraphs)
 personal_articles = []   # WITH LINKS + image -- one Telegram post per article
 file_news = []           # WITH LINKS -- written to the local artifact file
 new_links = set()
 counter = 1
 
-sources = [
-    ("திருப்பூர்", "ta"),
-    ("Tirupur", "en")
-]
+for site in SITES:
+    print(f"🔎 Scraping: {site['name']}")
+    articles = scrape_site(site)
+    print(f"   found {len(articles)} article link(s)")
 
-for query, lang in sources:
-    print(f"🔎 Fetching Google News: {query}")
-
-    for entry in google_news(query, lang):
-
-        real_url = resolve_google_url(entry.link)
-
-        if real_url in sent_links or real_url in new_links:
+    for title, url in articles:
+        if url in sent_links or url in new_links:
             continue
 
-        ist_dt = gmt_to_ist(entry.get("published", ""))
+        image_url, description = fetch_article_meta(url)
 
-        # ✅ ONLY TODAY'S NEWS (calendar-based)
-        if ist_dt and ist_dt.date() != now.date():
-            continue
-
-        title = entry.title.strip()
-        published = format_time(ist_dt)
-
-        # TELEGRAM (NO LINKS)
+        # TELEGRAM (NO LINKS) -- real short paragraph when available
+        desc_line = f"   {description}\n" if description else ""
         telegram_news.append(
             f"{counter}. {title}\n"
-            f"   Published: {published}"
+            f"{desc_line}"
+            f"   Source: {site['name']}"
         )
 
-        # PERSONAL CHAT (WITH LINKS + image, one post per article)
-        image_url = None
-        if SEND_TO_TELEGRAM and TELEGRAM_PERSONAL_CHAT_ID:
-            image_url, _ = fetch_article_meta(real_url)
+        # PERSONAL CHAT (WITH LINKS + image)
         personal_articles.append({
             "title": title,
-            "published": published,
-            "link": real_url,
+            "published": f"{site['name']}, {DISPLAY_DATE}",
+            "link": url,
             "image": image_url,
         })
 
         # FILE (WITH LINKS)
         file_news.append(
             f"{counter}. {title}\n"
-            f"   Published: {published}\n"
-            f"   Link: {real_url}\n"
+            f"{desc_line}"
+            f"   Source: {site['name']}\n"
+            f"   Link: {url}\n"
         )
 
-        new_links.add(real_url)
+        new_links.add(url)
         counter += 1
 
 # ================= SAVE DEDUP (rewrite, pruned) =================
@@ -299,7 +296,6 @@ if file_news:
             + "=" * 70 + "\n\n"
         )
         f.write("\n".join(file_news))
-
     print(f"📝 WITH-LINKS file created: {OUTPUT_FILE_WITH_LINKS}")
 
 HEADER = (
@@ -313,13 +309,11 @@ HEADER = (
 
 
 def chunk_items(header, items, max_len):
-    """Group items into message chunks that each stay under max_len,
-    repeating the header on every chunk so each message stands alone."""
     chunks = []
     current = []
     current_len = len(header)
     for item in items:
-        item_len = len(item) + 2  # +2 for the "\n\n" join separator
+        item_len = len(item) + 2
         if current and current_len + item_len > max_len:
             chunks.append(header + "\n\n".join(current))
             current = []
@@ -352,14 +346,10 @@ if not telegram_ok:
     raise SystemExit(1)
 
 # ================= SEND PERSONAL COPY (WITH LINKS + IMAGES) =================
-# Non-fatal: this is a bonus convenience feed for content creation, not
-# the primary delivery. One post per article (photo+caption when an
-# og:image was found, plain text otherwise) rather than a combined
-# digest, since each article stands alone as potential social content.
 if SEND_TO_TELEGRAM and TELEGRAM_PERSONAL_CHAT_ID:
     if personal_articles:
         for art in personal_articles:
-            caption = f"{art['title']}\nPublished: {art['published']}\nLink: {art['link']}"
+            caption = f"{art['title']}\n{art['published']}\nLink: {art['link']}"
             sent = False
             if art["image"]:
                 sent = send_photo_to_telegram(art["image"], caption, chat_id=TELEGRAM_PERSONAL_CHAT_ID)
