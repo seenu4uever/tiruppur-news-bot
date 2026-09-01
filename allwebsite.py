@@ -1,3 +1,4 @@
+import html
 import os
 import re
 import requests
@@ -97,7 +98,7 @@ def clean_title(title):
     the headline with no separator (e.g. 'திருப்பூர்பல்லடம்...') -- strip
     that duplicate leading category word when glued straight onto Tamil
     text with no space."""
-    return TITLE_PREFIX_DUPE_RE.sub('', title).strip()
+    return TITLE_PREFIX_DUPE_RE.sub('', html.unescape(title)).strip()
 
 
 def scrape_site(site):
