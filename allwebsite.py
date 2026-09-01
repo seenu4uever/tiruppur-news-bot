@@ -111,6 +111,8 @@ def scrape_site(site):
         print(f"❌ Failed to fetch {site['name']}: {e}")
         return []
 
+    print(f"   DEBUG {site['name']}: resp_len={len(resp.text)} has_h4={'MuiTypography-h4' in resp.text}")
+
     soup = BeautifulSoup(resp.text, "html.parser")
     best = {}
     for a in soup.find_all("a", href=True):
