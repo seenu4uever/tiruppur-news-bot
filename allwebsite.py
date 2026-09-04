@@ -182,12 +182,21 @@ def fetch_article_meta(url):
             soup = BeautifulSoup(html, "html.parser")
             # The first "allow-copy" paragraph is often just a short
             # dateline byline (e.g. "திருப்பூர், செப். 4–", ~20 chars) --
-            # skip those and take the first one that's an actual sentence.
+            # skip those. Combine the next several real sentences into a
+            # fuller excerpt (not just one sentence) up to ~350 chars,
+            # stopping at a paragraph boundary rather than cutting mid-way.
+            collected = []
+            total_len = 0
             for para in soup.find_all("p", class_=lambda c: c and "allow-copy" in c):
                 text = para.get_text(separator=" ", strip=True)
-                if text and len(text) >= 40:
-                    description = _clean_description(text)
+                if not text or len(text) < 40:
+                    continue
+                collected.append(text)
+                total_len += len(text)
+                if total_len >= 350:
                     break
+            if collected:
+                description = _clean_description(" ".join(collected))
 
         if description is None:
             desc_match = OG_DESC_RE.search(html) or DESC_FALLBACK_RE.search(html)
