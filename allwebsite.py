@@ -171,10 +171,28 @@ def fetch_article_meta(url):
         img_match = OG_IMAGE_RE.search(html)
         image = (img_match.group(1) or img_match.group(2)) if img_match else None
 
-        desc_match = OG_DESC_RE.search(html) or DESC_FALLBACK_RE.search(html)
         description = None
-        if desc_match:
-            description = _clean_description(_unescape_html(desc_match.group(1) or desc_match.group(2)))
+        if "dinamalar.com" in url:
+            # Dinamalar's own og:description is auto-generated and often
+            # truncated mid-sentence with no ellipsis (found 2026-09-04,
+            # e.g. cut at 99 chars, "...மாறியுள்ளதாக, 'சேவ்' அமைப்பு நிர்வாக"
+            # with no verb). Its actual article body paragraphs are marked
+            # with a distinct "allow-copy" class and contain the full,
+            # complete first sentence -- use that instead when present.
+            soup = BeautifulSoup(html, "html.parser")
+            # The first "allow-copy" paragraph is often just a short
+            # dateline byline (e.g. "திருப்பூர், செப். 4–", ~20 chars) --
+            # skip those and take the first one that's an actual sentence.
+            for para in soup.find_all("p", class_=lambda c: c and "allow-copy" in c):
+                text = para.get_text(separator=" ", strip=True)
+                if text and len(text) >= 40:
+                    description = _clean_description(text)
+                    break
+
+        if description is None:
+            desc_match = OG_DESC_RE.search(html) or DESC_FALLBACK_RE.search(html)
+            if desc_match:
+                description = _clean_description(_unescape_html(desc_match.group(1) or desc_match.group(2)))
 
         return image, description
     except Exception:
